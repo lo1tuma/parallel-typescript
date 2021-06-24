@@ -24,6 +24,9 @@
   },
   "dependencies": {
     "cmd-ts": "^0.7.0",
+    "execa": "^5.1.1",
+    "piscina": "^3.1.0",
+    "tslib": "^2.3.0",
     "typescript": ">=4.3.4"
   },
   "devDependencies": {

@@ -1,18 +1,20 @@
 #!/usr/bin/env node
 
-import * as childProcess from "child_process";
-import { Worker } from "worker_threads";
-import * as path from "path";
-import { command, run, string, boolean, flag, option } from "cmd-ts";
+import path from "path";
+import { command, run, number, string, boolean, flag, option } from "cmd-ts";
+import Piscina from "piscina";
+import os from "os";
 
-import * as ts from "typescript";
+import ts from "typescript";
 
 interface Args {
   tscPath: string;
   project: string;
-  useWorkers: boolean;
+  maxWorkers: number;
   verbose: boolean;
 }
+
+const cpuCount = os.cpus().length;
 
 const enum ProjectState {
   WaitForDeps,
@@ -137,11 +139,12 @@ function durationToStr(durInMs: number): string {
   return `${(durInMs / 1000).toFixed(2)}s`;
 }
 
-function buildInParallel(
+async function buildInParallel(
   projectsTree: ProjectsTree,
   startTime: number,
-  args: Args
-): void {
+  args: Args,
+  workerPool: Piscina
+): Promise<void> {
   if (projectsTree.areAllProjectsBuilt()) {
     console.log(
       `${projectsTree.projectsCount()} projects are compiled successfully in ${durationToStr(
@@ -168,55 +171,30 @@ function buildInParallel(
 
     const tscPath = path.resolve(process.cwd(), args.tscPath);
 
-    if (args.useWorkers) {
-      const worker = new Worker(tscPath, { argv });
-
-      worker.on("exit", (code: number) => {
-        if (code !== 0) {
-          console.error(`ERROR: Cannot build ${project}`);
-          process.exit(1);
-        }
-
-        console.log(
-          `  ${project} is built successfully in ${durationToStr(
-            Date.now() - projectStartTime
-          )}`
-        );
-
-        projectsTree.setProjectBuilt(project);
-        buildInParallel(projectsTree, startTime, args);
-      });
-    } else {
-      childProcess.exec(
-        `node ${tscPath} ${argv.join(" ")}`,
-        (
-          error: childProcess.ExecException | null,
-          stdout: string,
-          stderr: string
-        ) => {
-          if (error !== null) {
-            console.error(`Cannot build ${project}:\n${stderr || stdout}`);
-            process.exit(1);
-          }
-
-          // console.log(stdout);
-
-          console.log(
-            `  ${project} is built successfully in ${durationToStr(
-              Date.now() - projectStartTime
-            )}`
-          );
-
-          projectsTree.setProjectBuilt(project);
-          buildInParallel(projectsTree, startTime, args);
-        }
+    try {
+      await workerPool.run({ tscPath, argv }, { name: "runTsc" });
+      console.log(
+        `  ${project} is built successfully in ${durationToStr(
+          Date.now() - projectStartTime
+        )}`
       );
+      projectsTree.setProjectBuilt(project);
+      await buildInParallel(projectsTree, startTime, args, workerPool);
+    } catch (error) {
+      console.log(error);
+      console.error(`ERROR: Cannot build ${project}`);
+      process.exit(1);
     }
   }
 }
 
-function main(args: Args): void {
+async function main(args: Args): Promise<void> {
   let project = args.project;
+
+  const workerPool = new Piscina({
+    filename: path.resolve(__dirname, "./worker.js"),
+    maxThreads: args.maxWorkers,
+  });
 
   const host = ts.createSolutionBuilderHost();
   const builder = ts.createSolutionBuilder(host, [project], {
@@ -252,15 +230,15 @@ function main(args: Args): void {
 
   console.log("build flow:", JSON.stringify(tree.getBuildFlow()));
 
-  buildInParallel(tree, Date.now(), args);
+  await buildInParallel(tree, Date.now(), args, workerPool);
 }
 
 const app = command({
   name: "ptsc",
   description: "Compile typescript projects in parallel.",
   version: "0.0.1",
-  handler(args) {
-    main(args);
+  async handler(args) {
+    await main(args);
   },
   args: {
     tscPath: option({
@@ -279,11 +257,11 @@ const app = command({
       },
       defaultValueIsSerializable: true,
     }),
-    useWorkers: flag({
+    maxWorkers: option({
       long: "workers",
-      type: boolean,
+      type: number,
       defaultValue() {
-        return false;
+        return cpuCount;
       },
       defaultValueIsSerializable: true,
     }),
