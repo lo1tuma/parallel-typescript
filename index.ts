@@ -1,17 +1,15 @@
 #!/usr/bin/env node
 
 import path from "path";
-import { command, run, number, string, boolean, flag, option } from "cmd-ts";
+import { command, run, number, string, option } from "cmd-ts";
 import Piscina from "piscina";
 import os from "os";
 
 import ts from "typescript";
 
 interface Args {
-  tscPath: string;
   project: string;
   maxWorkers: number;
-  verbose: boolean;
 }
 
 const cpuCount = os.cpus().length;
@@ -163,16 +161,8 @@ async function buildInParallel(
     const projectStartTime = Date.now();
     console.log(`Running build for ${project}...`);
 
-    const argv = ["-b", project];
-
-    if (args.verbose) {
-      argv.push("--verbose");
-    }
-
-    const tscPath = path.resolve(process.cwd(), args.tscPath);
-
     try {
-      await workerPool.run({ tscPath, argv }, { name: "runTsc" });
+      await workerPool.run({ tsconfigPath: project }, { name: "runTsc" });
       console.log(
         `  ${project} is built successfully in ${durationToStr(
           Date.now() - projectStartTime
@@ -254,14 +244,6 @@ const app = command({
     await main(args);
   },
   args: {
-    tscPath: option({
-      long: "tsc-path",
-      type: string,
-      defaultValue() {
-        return "node_modules/typescript/lib/tsc.js";
-      },
-      defaultValueIsSerializable: true,
-    }),
     project: option({
       long: "project",
       type: string,
@@ -275,14 +257,6 @@ const app = command({
       type: number,
       defaultValue() {
         return cpuCount;
-      },
-      defaultValueIsSerializable: true,
-    }),
-    verbose: flag({
-      long: "verbose",
-      type: boolean,
-      defaultValue() {
-        return false;
       },
       defaultValueIsSerializable: true,
     }),
