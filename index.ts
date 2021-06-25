@@ -32,6 +32,18 @@ class ProjectsTree {
   private projectsState = new Map<string, ProjectState>();
   private dependenciesForProject = new Map<string, string[]>();
 
+  private promise: Promise<void>;
+  private resolve: (() => void) | null;
+  private isResolved: boolean;
+
+  constructor() {
+    this.isResolved = false;
+    this.resolve = null;
+    this.promise = new Promise((resolve) => {
+      this.resolve = resolve;
+    });
+  }
+
   public getBuildFlow(): number[] {
     const copy = new ProjectsTree();
     copy.projectsState = new Map(this.projectsState);
@@ -97,6 +109,13 @@ class ProjectsTree {
     );
     this.projectsState.set(projectPath, ProjectState.Built);
     this.updateProjectsState();
+
+    if (!this.isResolved) {
+      if (this.areAllProjectsBuilt()) {
+        this.resolve?.();
+        this.isResolved = true;
+      }
+    }
   }
 
   public areAllProjectsBuilt(): boolean {
@@ -107,6 +126,10 @@ class ProjectsTree {
     });
 
     return result;
+  }
+
+  public waitUntilAllProjectsAreBuilt(): Promise<void> {
+    return this.promise;
   }
 
   private updateProjectsState(): void {
@@ -137,12 +160,44 @@ function durationToStr(durInMs: number): string {
   return `${(durInMs / 1000).toFixed(2)}s`;
 }
 
-async function buildInParallel(
+const promises: Promise<void>[] = [];
+
+async function buildProject(
+  project: string,
   projectsTree: ProjectsTree,
   startTime: number,
-  args: Args,
   workerPool: Piscina
 ): Promise<void> {
+  const projectStartTime = Date.now();
+  console.log(`Running build for ${project}...`);
+
+  try {
+    await workerPool.run({ tsconfigPath: project }, { name: "runTsc" });
+    console.log(
+      `  ${project} is built successfully in ${durationToStr(
+        Date.now() - projectStartTime
+      )}`,
+      "threads:",
+      workerPool.threads.length,
+      "utilization:",
+      workerPool.utilization,
+      "queueSize:",
+      workerPool.queueSize
+    );
+    projectsTree.setProjectBuilt(project);
+    buildInParallel(projectsTree, startTime, workerPool);
+  } catch (error) {
+    console.log(error);
+    console.error(`ERROR: Cannot build ${project}`);
+    process.exit(1);
+  }
+}
+
+function buildInParallel(
+  projectsTree: ProjectsTree,
+  startTime: number,
+  workerPool: Piscina
+): void {
   if (projectsTree.areAllProjectsBuilt()) {
     console.log(
       `${projectsTree.projectsCount()} projects are compiled successfully in ${durationToStr(
@@ -158,29 +213,8 @@ async function buildInParallel(
   }
 
   for (const project of projectsToBuild) {
-    const projectStartTime = Date.now();
-    console.log(`Running build for ${project}...`);
-
-    try {
-      await workerPool.run({ tsconfigPath: project }, { name: "runTsc" });
-      console.log(
-        `  ${project} is built successfully in ${durationToStr(
-          Date.now() - projectStartTime
-        )}`,
-        "threads:",
-        workerPool.threads.length,
-        "utilization:",
-        workerPool.utilization,
-        "queueSize:",
-        workerPool.queueSize
-      );
-      projectsTree.setProjectBuilt(project);
-      await buildInParallel(projectsTree, startTime, args, workerPool);
-    } catch (error) {
-      console.log(error);
-      console.error(`ERROR: Cannot build ${project}`);
-      process.exit(1);
-    }
+    const promise = buildProject(project, projectsTree, startTime, workerPool);
+    promises.push(promise);
   }
 }
 
@@ -233,7 +267,10 @@ async function main(args: Args): Promise<void> {
 
   console.log("build flow:", JSON.stringify(tree.getBuildFlow()));
 
-  await buildInParallel(tree, Date.now(), args, workerPool);
+  buildInParallel(tree, Date.now(), workerPool);
+
+  await tree.waitUntilAllProjectsAreBuilt();
+  await Promise.all(promises);
 }
 
 const app = command({

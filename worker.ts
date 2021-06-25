@@ -20,6 +20,6 @@ interface Options {
   tsconfigPath: string;
 }
 
-export async function runTsc(options: Options): Promise<void> {
+export function runTsc(options: Options): void {
   compile(options.tsconfigPath);
 }
