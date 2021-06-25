@@ -16,7 +16,8 @@
     "url": "https://github.com/timocov/parallel-typescript.git"
   },
   "files": [
-    "index.js"
+    "index.js",
+    "worker.js"
   ],
   "keywords": [],
   "engines": {

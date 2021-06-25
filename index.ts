@@ -176,7 +176,13 @@ async function buildInParallel(
       console.log(
         `  ${project} is built successfully in ${durationToStr(
           Date.now() - projectStartTime
-        )}`
+        )}`,
+        "threads:",
+        workerPool.threads.length,
+        "utilization:",
+        workerPool.utilization,
+        "queueSize:",
+        workerPool.queueSize
       );
       projectsTree.setProjectBuilt(project);
       await buildInParallel(projectsTree, startTime, args, workerPool);
@@ -193,7 +199,14 @@ async function main(args: Args): Promise<void> {
 
   const workerPool = new Piscina({
     filename: path.resolve(__dirname, "./worker.js"),
+    minThreads: args.maxWorkers,
     maxThreads: args.maxWorkers,
+    useAtomics: true,
+    idleTimeout: Number.MAX_SAFE_INTEGER,
+    concurrentTasksPerWorker: 1,
+    resourceLimits: {
+      stackSizeMb: 512,
+    },
   });
 
   const host = ts.createSolutionBuilderHost();
