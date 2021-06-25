@@ -229,7 +229,7 @@ async function main(args: Args): Promise<void> {
     idleTimeout: Number.MAX_SAFE_INTEGER,
     concurrentTasksPerWorker: 1,
     resourceLimits: {
-      stackSizeMb: 512,
+      stackSizeMb: 32,
     },
   });
 
